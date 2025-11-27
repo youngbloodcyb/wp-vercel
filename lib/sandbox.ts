@@ -133,7 +133,5 @@ export const initSandbox = async ({
     detached: true
   });
 
-  sendUpdate('Sandbox ready! ✅', 'done');
-
   return sandbox;
 };
