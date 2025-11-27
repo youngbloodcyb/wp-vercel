@@ -1,26 +1,17 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  output: 'standalone',
   images: {
     remotePatterns: [
       {
-        protocol: "https",
+        protocol: 'https',
         hostname: `${process.env.WORDPRESS_HOSTNAME}`,
-        port: "",
-        pathname: "/**",
-      },
-    ],
-  },
-  async redirects() {
-    return [
-      {
-        source: "/admin",
-        destination: `${process.env.WORDPRESS_URL}/wp-admin`,
-        permanent: true,
-      },
-    ];
-  },
+        port: '',
+        pathname: '/**'
+      }
+    ]
+  }
 };
 
 export default nextConfig;

@@ -1,47 +1,47 @@
-import "./globals.css";
+import './globals.css';
 
-import { Section, Container } from "@/components/craft";
-import { Inter as FontSans } from "next/font/google";
-import { ThemeProvider } from "@/components/theme/theme-provider";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
-import { MobileNav } from "@/components/nav/mobile-nav";
-import { Analytics } from "@vercel/analytics/react";
-import { Button } from "@/components/ui/button";
+import { Section, Container } from '@/components/craft';
+import { Inter as FontSans } from 'next/font/google';
+import { ThemeProvider } from '@/components/theme/theme-provider';
+import { ThemeToggle } from '@/components/theme/theme-toggle';
+import { MobileNav } from '@/components/nav/mobile-nav';
+import { Analytics } from '@vercel/analytics/react';
+import { Button } from '@/components/ui/button';
 
-import { mainMenu, contentMenu } from "@/menu.config";
-import { siteConfig } from "@/site.config";
-import { cn } from "@/lib/utils";
+import { mainMenu, contentMenu } from '@/menu.config';
+import { siteConfig } from '@/site.config';
+import { cn } from '@/lib/utils';
 
-import Logo from "@/public/logo.svg";
-import Image from "next/image";
-import Link from "next/link";
+import Logo from '@/public/logo.svg';
+import Image from 'next/image';
+import Link from 'next/link';
 
-import type { Metadata } from "next";
+import type { Metadata } from 'next';
 
 const font = FontSans({
-  subsets: ["latin"],
-  variable: "--font-sans",
+  subsets: ['latin'],
+  variable: '--font-sans'
 });
 
 export const metadata: Metadata = {
-  title: "WordPress & Next.js Starter by 9d8",
+  title: 'WordPress & Next.js Starter by 9d8',
   description:
-    "A starter template for Next.js with WordPress as a headless CMS.",
+    'A starter template for Next.js with WordPress as a headless CMS.',
   metadataBase: new URL(siteConfig.site_domain),
   alternates: {
-    canonical: "/",
-  },
+    canonical: '/'
+  }
 };
 
 export default function RootLayout({
-  children,
+  children
 }: {
   children: React.ReactNode;
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head />
-      <body className={cn("min-h-screen font-sans antialiased", font.variable)}>
+      <body className={cn('min-h-screen font-sans antialiased', font.variable)}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
@@ -61,7 +61,7 @@ export default function RootLayout({
 const Nav = ({ className, children, id }: NavProps) => {
   return (
     <nav
-      className={cn("sticky z-50 top-0 bg-background", "border-b", className)}
+      className={cn('sticky z-50 top-0 bg-background', 'border-b', className)}
       id={id}
     >
       <div
