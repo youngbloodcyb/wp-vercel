@@ -13,10 +13,9 @@ export const initSandbox = async ({
 }: {
   controller?: ReadableStreamDefaultController;
 } = {}): Promise<SandboxType> => {
-  const totalSteps = 5;
+  const totalSteps = 6;
   let currentStep = 0;
 
-  // Helper function to send updates to the stream
   const sendUpdate = (text: string, action: string = 'processing') => {
     if (controller) {
       currentStep++;
@@ -41,13 +40,16 @@ export const initSandbox = async ({
   });
   console.log('Sandbox created:', sandbox.sandboxId);
 
-  sendUpdate('Installing PHP...');
+  // 1) Install PHP + nginx + php-fpm
+  sendUpdate('Installing PHP, nginx, and PHP-FPM...');
   const phpInstall = await sandbox.runCommand({
     cmd: 'dnf',
     args: [
       'install',
       '-y',
+      'nginx',
       'php8.1-cli',
+      'php8.1-fpm',
       'php8.1-mysqlnd',
       'php8.1-gd',
       'php8.1-mbstring',
@@ -59,19 +61,23 @@ export const initSandbox = async ({
     stderr: process.stderr
   });
   if (phpInstall.exitCode !== 0) {
-    console.error('PHP install failed');
+    console.error('PHP/nginx install failed');
     process.exit(1);
   }
 
+  // 2) Download WordPress
   sendUpdate('Downloading WordPress...');
-  await sandbox.runCommand({
+  const wpDownload = await sandbox.runCommand({
     cmd: 'bash',
     args: [
       '-lc',
       [
+        'set -e',
         'cd /vercel/sandbox',
-        'curl -L https://wordpress.org/latest.tar.gz -o latest.tar.gz',
-        'tar -xzf latest.tar.gz',
+        'curl -fL https://wordpress.org/latest.tar.gz -o latest.tar.gz',
+        'ls -lh latest.tar.gz',
+        'mkdir -p wordpress',
+        'tar -xzf latest.tar.gz -C wordpress --strip-components=1',
         'rm latest.tar.gz'
       ].join(' && ')
     ],
@@ -79,6 +85,20 @@ export const initSandbox = async ({
     stderr: process.stderr
   });
 
+  console.log('WordPress download exit code:', wpDownload.exitCode);
+  if (wpDownload.exitCode !== 0) {
+    console.error('WordPress download/extract failed');
+    process.exit(1);
+  }
+
+  await sandbox.runCommand({
+    cmd: 'bash',
+    args: ['-lc', 'ls -lah /vercel/sandbox/wordpress'],
+    stdout: process.stdout,
+    stderr: process.stderr
+  });
+
+  // 3) Configure wp-config.php
   sendUpdate('Configuring WordPress database...');
 
   const publicUrl = process.env.MYSQL_PUBLIC_URL!;
@@ -93,7 +113,7 @@ export const initSandbox = async ({
     process.env.MYSQLPASSWORD ||
     process.env.MYSQL_ROOT_PASSWORD ||
     parsed.password;
-  const dbHost = parsed.hostname; // e.g. ballast.proxy.rlwy.net
+  const dbHost = parsed.hostname;
   const dbPort = parsed.port || '3306';
 
   console.log('Using DB config:', { dbHost, dbPort, dbName, dbUser });
@@ -121,7 +141,7 @@ export const initSandbox = async ({
     define( 'WP_DEBUG', true );
 
     if ( ! defined( 'ABSPATH' ) ) {
-    define( 'ABSPATH', __DIR__ . '/' );
+      define( 'ABSPATH', __DIR__ . '/' );
     }
     require_once ABSPATH . 'wp-settings.php';
   `;
@@ -133,10 +153,148 @@ export const initSandbox = async ({
     }
   ]);
 
-  sendUpdate('Starting PHP server on :3000...');
+  // 4) Configure php-fpm and nginx
+  sendUpdate('Configuring nginx and PHP-FPM...');
+
+  // php-fpm pool: listen on 127.0.0.1:9000 to match fastcgi_pass
+  const phpFpmPoolConfig = `
+[www]
+user = nginx
+group = nginx
+listen = 127.0.0.1:9000
+listen.allowed_clients = 127.0.0.1
+pm = dynamic
+pm.max_children = 5
+pm.start_servers = 2
+pm.min_spare_servers = 1
+pm.max_spare_servers = 3
+catch_workers_output = yes
+`;
+
+  // Single-site nginx config, adapted from WordPress docs:
+  // https://developer.wordpress.org/advanced-administration/server/web-server/nginx/
+  const nginxServerConfig = `
+server {
+  listen 3000 default_server;
+  server_name _;
+
+  # WordPress root
+  root /vercel/sandbox/wordpress;
+  index index.php index.html index.htm;
+
+  # Favicon and robots
+  location = /favicon.ico {
+    log_not_found off;
+    access_log off;
+  }
+
+  location = /robots.txt {
+    allow all;
+    log_not_found off;
+    access_log off;
+  }
+
+  # Main front controller
+  location / {
+    # No PHP for static content, fall back to index.php for WP routing
+    try_files $uri $uri/ /index.php?$args;
+  }
+
+  # PHP handling (php-fpm)
+  location ~ \\.php$ {
+    # WordPress docs recommend this with cgi.fix_pathinfo=0 in php.ini
+    include fastcgi.conf;
+    fastcgi_intercept_errors on;
+    fastcgi_pass 127.0.0.1:9000;
+  }
+
+  # Static assets
+  location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|webp)$ {
+    expires max;
+    log_not_found off;
+  }
+}
+`;
+
+  // Write configs using sudo via heredoc
   await sandbox.runCommand({
     cmd: 'bash',
-    args: ['-lc', 'cd /vercel/sandbox/wordpress && php -S 0.0.0.0:3000 -t .'],
+    args: [
+      '-lc',
+      `cat << 'EOF' > /etc/php-fpm.d/www.conf
+${phpFpmPoolConfig}
+EOF`
+    ],
+    sudo: true,
+    stdout: process.stdout,
+    stderr: process.stderr
+  });
+
+  await sandbox.runCommand({
+    cmd: 'bash',
+    args: [
+      '-lc',
+      `cat << 'EOF' > /etc/nginx/conf.d/wordpress.conf
+${nginxServerConfig}
+EOF`
+    ],
+    sudo: true,
+    stdout: process.stdout,
+    stderr: process.stderr
+  });
+
+  // Ensure php-fpm PID directory exists
+  await sandbox.runCommand({
+    cmd: 'bash',
+    args: ['-lc', 'mkdir -p /run/php-fpm'],
+    sudo: true,
+    stdout: process.stdout,
+    stderr: process.stderr
+  });
+
+  // Test configs before starting services
+  const phpFpmTest = await sandbox.runCommand({
+    cmd: 'bash',
+    args: ['-lc', 'php-fpm -t'],
+    sudo: true,
+    stdout: process.stdout,
+    stderr: process.stderr
+  });
+  console.log('php-fpm test exit:', phpFpmTest.exitCode);
+  if (phpFpmTest.exitCode !== 0) {
+    console.error('php-fpm config test failed');
+    process.exit(1);
+  }
+
+  const nginxTest = await sandbox.runCommand({
+    cmd: 'bash',
+    args: ['-lc', 'nginx -t'],
+    sudo: true,
+    stdout: process.stdout,
+    stderr: process.stderr
+  });
+  console.log('nginx test exit:', nginxTest.exitCode);
+  if (nginxTest.exitCode !== 0) {
+    console.error('nginx config test failed');
+    process.exit(1);
+  }
+
+  // 5) Start php-fpm and nginx instead of php -S
+  sendUpdate('Starting PHP-FPM and nginx on :3000...');
+
+  await sandbox.runCommand({
+    cmd: 'bash',
+    args: ['-lc', 'php-fpm -F'],
+    sudo: true,
+    stdout: process.stdout,
+    stderr: process.stderr,
+    detached: true
+  });
+
+  await sandbox.runCommand({
+    cmd: 'bash',
+    args: ['-lc', 'nginx -g "daemon off;"'],
+    sudo: true,
     stdout: process.stdout,
     stderr: process.stderr,
     detached: true
