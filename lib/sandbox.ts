@@ -31,6 +31,7 @@ export const initSandbox = async ({
     console.log(text);
   };
 
+  // 0) Create sandbox
   sendUpdate('Creating sandbox...', 'sandbox-create');
   const sandbox = await Sandbox.create({
     timeout: ms('30m'),
@@ -40,16 +41,16 @@ export const initSandbox = async ({
   });
   console.log('Sandbox created:', sandbox.sandboxId);
 
-  // 1) Install PHP + nginx + php-fpm
-  sendUpdate('Installing PHP, nginx, and PHP-FPM...');
+  // 1) Install PHP + Apache (httpd)
+  sendUpdate('Installing PHP and Apache (httpd)...');
   const phpInstall = await sandbox.runCommand({
     cmd: 'dnf',
     args: [
       'install',
       '-y',
-      'nginx',
+      'httpd',
+      'php8.1',
       'php8.1-cli',
-      'php8.1-fpm',
       'php8.1-mysqlnd',
       'php8.1-gd',
       'php8.1-mbstring',
@@ -61,7 +62,7 @@ export const initSandbox = async ({
     stderr: process.stderr
   });
   if (phpInstall.exitCode !== 0) {
-    console.error('PHP/nginx install failed');
+    console.error('PHP/Apache install failed');
     process.exit(1);
   }
 
@@ -94,6 +95,31 @@ export const initSandbox = async ({
   await sandbox.runCommand({
     cmd: 'bash',
     args: ['-lc', 'ls -lah /vercel/sandbox/wordpress'],
+    stdout: process.stdout,
+    stderr: process.stderr
+  });
+
+  // Ensure Apache can traverse all parent directories and read files
+  await sandbox.runCommand({
+    cmd: 'bash',
+    args: [
+      '-lc',
+      [
+        'chmod 755 /vercel || true',
+        'chmod 755 /vercel/sandbox || true',
+        'chmod -R 755 /vercel/sandbox/wordpress || true'
+      ].join(' && ')
+    ],
+    sudo: true,
+    stdout: process.stdout,
+    stderr: process.stderr
+  });
+
+  // Optional: ownership (not strictly required if perms are 755)
+  await sandbox.runCommand({
+    cmd: 'bash',
+    args: ['-lc', 'chown -R apache:apache /vercel/sandbox/wordpress || true'],
+    sudo: true,
     stdout: process.stdout,
     stderr: process.stderr
   });
@@ -153,76 +179,57 @@ export const initSandbox = async ({
     }
   ]);
 
-  // 4) Configure php-fpm and nginx
-  sendUpdate('Configuring nginx and PHP-FPM...');
+  // 4) Configure Apache (httpd) for WordPress
+  sendUpdate('Configuring Apache for WordPress...');
 
-  // php-fpm pool: listen on 127.0.0.1:9000 to match fastcgi_pass
-  const phpFpmPoolConfig = `
-[www]
-user = nginx
-group = nginx
-listen = 127.0.0.1:9000
-listen.allowed_clients = 127.0.0.1
-pm = dynamic
-pm.max_children = 5
-pm.start_servers = 2
-pm.min_spare_servers = 1
-pm.max_spare_servers = 3
-catch_workers_output = yes
+  const httpdVhostConfig = `
+ServerName localhost
+
+<VirtualHost *:3000>
+    ServerName localhost
+
+    DocumentRoot /vercel/sandbox/wordpress
+
+    # Allow Apache to serve everything under /vercel
+    <Directory "/vercel">
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    <Directory "/vercel/sandbox">
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    <Directory "/vercel/sandbox/wordpress">
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    DirectoryIndex index.php index.html
+
+    ErrorLog /var/log/httpd/wordpress-error.log
+    CustomLog /var/log/httpd/wordpress-access.log combined
+
+    <FilesMatch \\.php$>
+        SetHandler application/x-httpd-php
+    </FilesMatch>
+</VirtualHost>
+
+# Listen on port 3000 for this vhost
+Listen 3000
 `;
 
-  // Single-site nginx config, adapted from WordPress docs:
-  // https://developer.wordpress.org/advanced-administration/server/web-server/nginx/
-  const nginxServerConfig = `
-server {
-  listen 3000 default_server;
-  server_name _;
-
-  # WordPress root
-  root /vercel/sandbox/wordpress;
-  index index.php index.html index.htm;
-
-  # Favicon and robots
-  location = /favicon.ico {
-    log_not_found off;
-    access_log off;
-  }
-
-  location = /robots.txt {
-    allow all;
-    log_not_found off;
-    access_log off;
-  }
-
-  # Main front controller
-  location / {
-    # No PHP for static content, fall back to index.php for WP routing
-    try_files $uri $uri/ /index.php?$args;
-  }
-
-  # PHP handling (php-fpm)
-  location ~ \\.php$ {
-    # WordPress docs recommend this with cgi.fix_pathinfo=0 in php.ini
-    include fastcgi.conf;
-    fastcgi_intercept_errors on;
-    fastcgi_pass 127.0.0.1:9000;
-  }
-
-  # Static assets
-  location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|webp)$ {
-    expires max;
-    log_not_found off;
-  }
-}
-`;
-
-  // Write configs using sudo via heredoc
+  // Write Apache vhost config
   await sandbox.runCommand({
     cmd: 'bash',
     args: [
       '-lc',
-      `cat << 'EOF' > /etc/php-fpm.d/www.conf
-${phpFpmPoolConfig}
+      `cat << 'EOF' > /etc/httpd/conf.d/wordpress.conf
+${httpdVhostConfig}
 EOF`
     ],
     sudo: true,
@@ -230,70 +237,35 @@ EOF`
     stderr: process.stderr
   });
 
-  await sandbox.runCommand({
+  // 5) Test Apache config
+  const httpdTest = await sandbox.runCommand({
     cmd: 'bash',
-    args: [
-      '-lc',
-      `cat << 'EOF' > /etc/nginx/conf.d/wordpress.conf
-${nginxServerConfig}
-EOF`
-    ],
+    args: ['-lc', 'httpd -t'],
     sudo: true,
     stdout: process.stdout,
     stderr: process.stderr
   });
-
-  // Ensure php-fpm PID directory exists
-  await sandbox.runCommand({
-    cmd: 'bash',
-    args: ['-lc', 'mkdir -p /run/php-fpm'],
-    sudo: true,
-    stdout: process.stdout,
-    stderr: process.stderr
-  });
-
-  // Test configs before starting services
-  const phpFpmTest = await sandbox.runCommand({
-    cmd: 'bash',
-    args: ['-lc', 'php-fpm -t'],
-    sudo: true,
-    stdout: process.stdout,
-    stderr: process.stderr
-  });
-  console.log('php-fpm test exit:', phpFpmTest.exitCode);
-  if (phpFpmTest.exitCode !== 0) {
-    console.error('php-fpm config test failed');
+  console.log('httpd config test exit:', httpdTest.exitCode);
+  if (httpdTest.exitCode !== 0) {
+    console.error('Apache (httpd) config test failed');
     process.exit(1);
   }
 
-  const nginxTest = await sandbox.runCommand({
+  // 6) Start Apache (httpd) on :3000
+  sendUpdate('Starting Apache (httpd) on :3000...');
+
+  // Kill any stray httpd from earlier runs
+  await sandbox.runCommand({
     cmd: 'bash',
-    args: ['-lc', 'nginx -t'],
+    args: ['-lc', 'pkill httpd || true'],
     sudo: true,
     stdout: process.stdout,
     stderr: process.stderr
   });
-  console.log('nginx test exit:', nginxTest.exitCode);
-  if (nginxTest.exitCode !== 0) {
-    console.error('nginx config test failed');
-    process.exit(1);
-  }
-
-  // 5) Start php-fpm and nginx instead of php -S
-  sendUpdate('Starting PHP-FPM and nginx on :3000...');
 
   await sandbox.runCommand({
     cmd: 'bash',
-    args: ['-lc', 'php-fpm -F'],
-    sudo: true,
-    stdout: process.stdout,
-    stderr: process.stderr,
-    detached: true
-  });
-
-  await sandbox.runCommand({
-    cmd: 'bash',
-    args: ['-lc', 'nginx -g "daemon off;"'],
+    args: ['-lc', 'httpd -DFOREGROUND'],
     sudo: true,
     stdout: process.stdout,
     stderr: process.stderr,
