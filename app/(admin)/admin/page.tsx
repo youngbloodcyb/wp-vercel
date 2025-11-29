@@ -2,7 +2,7 @@
 
 import { Container, Section } from '@/components/craft';
 import { Button } from '@/components/ui/button';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 type StepUpdate = {
   action: string;
@@ -17,6 +17,13 @@ export default function Page() {
   const [sandboxUrl, setSandboxUrl] = useState<string | null>(null);
   const [updates, setUpdates] = useState<StepUpdate[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  // Auto-open sandbox URL in new tab when ready
+  useEffect(() => {
+    if (sandboxUrl) {
+      window.open(`${sandboxUrl}/wp-admin`, '_blank');
+    }
+  }, [sandboxUrl]);
 
   const initializeSandbox = async () => {
     setIsLoading(true);
@@ -111,14 +118,20 @@ export default function Page() {
             </div>
           )}
 
-          {/* Sandbox iframe */}
+          {/* Sandbox opened confirmation */}
           {sandboxUrl && (
-            <div className="h-[800px] w-full overflow-hidden rounded-lg border">
-              <iframe
-                src={`${sandboxUrl}/wp-admin`}
-                className="h-full w-full"
-                title="WordPress Sandbox"
-              />
+            <div className="rounded-lg border border-green-500 bg-green-500/10 p-4">
+              <p className="text-sm text-green-600 dark:text-green-400">
+                Sandbox opened in a new tab.{' '}
+                <a
+                  href={`${sandboxUrl}/wp-admin`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:no-underline"
+                >
+                  Click here to open again
+                </a>
+              </p>
             </div>
           )}
 
