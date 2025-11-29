@@ -99,23 +99,32 @@ export const initSandbox = async ({
   console.log('Using DB config:', { dbHost, dbPort, dbName, dbUser });
 
   const wpConfig = `
-    <?php
+  <?php
     define( 'DB_NAME', '${dbName}' );
     define( 'DB_USER', '${dbUser}' );
     define( 'DB_PASSWORD', '${dbPassword}' );
     define( 'DB_HOST', '${dbHost}:${dbPort}' );
     define( 'DB_CHARSET', 'utf8mb4' );
     define( 'DB_COLLATE', '' );
-    
+
+    define( 'WP_HOME', 'https://' . $_SERVER['HTTP_HOST'] );
+    define( 'WP_SITEURL', 'https://' . $_SERVER['HTTP_HOST'] );
+
+    if (
+        isset($_SERVER['HTTP_X_FORWARDED_PROTO']) &&
+        $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https'
+    ) {
+        $_SERVER['HTTPS'] = 'on';
+    }
+
     $table_prefix = 'wp_';
-    
     define( 'WP_DEBUG', true );
-    
+
     if ( ! defined( 'ABSPATH' ) ) {
-      define( 'ABSPATH', __DIR__ . '/' );
+    define( 'ABSPATH', __DIR__ . '/' );
     }
     require_once ABSPATH . 'wp-settings.php';
-    `;
+  `;
 
   await sandbox.writeFiles([
     {
