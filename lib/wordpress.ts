@@ -14,10 +14,6 @@ import type {
 
 const baseUrl = process.env.WORDPRESS_URL;
 
-if (!baseUrl) {
-  throw new Error('WORDPRESS_URL environment variable is not defined');
-}
-
 class WordPressAPIError extends Error {
   constructor(message: string, public status: number, public endpoint: string) {
     super(message);
