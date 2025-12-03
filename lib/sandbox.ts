@@ -33,38 +33,58 @@ export const initSandbox = async ({
 
   // 0) Create sandbox
   sendUpdate('Creating sandbox...', 'sandbox-create');
-  const sandbox = await Sandbox.create({
-    timeout: ms('30m'),
-    resources: { vcpus: 4 },
-    ports: [3000],
-    runtime: 'node22'
-  });
-  console.log('Sandbox created:', sandbox.sandboxId);
+  let sandbox: SandboxType;
+  try {
+    sandbox = await Sandbox.create({
+      timeout: ms('30m'),
+      resources: { vcpus: 4 },
+      ports: [3000],
+      runtime: 'node22'
+    });
+    console.log('Sandbox created:', sandbox.sandboxId);
+  } catch (createError) {
+    console.error('Step 0 - Sandbox.create() failed:', createError);
+    throw new Error(
+      `[Step 0] Sandbox creation failed: ${
+        createError instanceof Error ? createError.message : 'unknown error'
+      }`
+    );
+  }
 
   // 1) Install PHP + Apache (httpd) + PHP-FPM per AL2023 guide
   sendUpdate('Installing PHP and Apache (httpd)...');
-  const phpInstall = await sandbox.runCommand({
-    cmd: 'dnf',
-    args: [
-      'install',
-      '-y',
-      'wget',
-      'php-mysqlnd',
-      'httpd',
-      'php-fpm',
-      'php-mysqli',
-      'mariadb105-server',
-      'php-json',
-      'php',
-      'php-devel'
-    ],
-    sudo: true,
-    stdout: process.stdout,
-    stderr: process.stderr
-  });
-  if (phpInstall.exitCode !== 0) {
-    console.error('PHP/Apache install failed');
-    process.exit(1);
+  try {
+    const phpInstall = await sandbox.runCommand({
+      cmd: 'dnf',
+      args: [
+        'install',
+        '-y',
+        'wget',
+        'php-mysqlnd',
+        'httpd',
+        'php-fpm',
+        'php-mysqli',
+        'mariadb105-server',
+        'php-json',
+        'php',
+        'php-devel'
+      ],
+      sudo: true,
+      stdout: process.stdout,
+      stderr: process.stderr
+    });
+    if (phpInstall.exitCode !== 0) {
+      throw new Error(
+        `PHP/Apache install failed with exit code ${phpInstall.exitCode}`
+      );
+    }
+  } catch (installError) {
+    console.error('Step 1 - PHP/Apache install failed:', installError);
+    throw new Error(
+      `[Step 1] PHP/Apache install failed: ${
+        installError instanceof Error ? installError.message : 'unknown error'
+      }`
+    );
   }
 
   // Configure PHP-FPM to listen on socket and run as apache user
@@ -89,19 +109,29 @@ export const initSandbox = async ({
   // 2) Download WordPress
   sendUpdate('Downloading WordPress...');
 
-  const wpDownload = await sandbox.runCommand({
-    cmd: 'bash',
-    args: [
-      '-lc',
-      'cd /vercel/sandbox && wget https://wordpress.org/latest.tar.gz && tar -xzf latest.tar.gz'
-    ],
-    stdout: process.stdout,
-    stderr: process.stderr
-  });
+  try {
+    const wpDownload = await sandbox.runCommand({
+      cmd: 'bash',
+      args: [
+        '-lc',
+        'cd /vercel/sandbox && wget https://wordpress.org/latest.tar.gz && tar -xzf latest.tar.gz'
+      ],
+      stdout: process.stdout,
+      stderr: process.stderr
+    });
 
-  if (wpDownload.exitCode !== 0) {
-    console.error('WordPress download failed');
-    process.exit(1);
+    if (wpDownload.exitCode !== 0) {
+      throw new Error(
+        `WordPress download failed with exit code ${wpDownload.exitCode}`
+      );
+    }
+  } catch (downloadError) {
+    console.error('Step 2 - WordPress download failed:', downloadError);
+    throw new Error(
+      `[Step 2] WordPress download failed: ${
+        downloadError instanceof Error ? downloadError.message : 'unknown error'
+      }`
+    );
   }
 
   // Copy sample config as a base (not strictly needed, but mirrors upstream flow)
@@ -140,97 +170,168 @@ export const initSandbox = async ({
     stderr: process.stderr
   });
 
-  // Optional: ownership (helps with logs/uploads where relevant)
-  await sandbox.runCommand({
-    cmd: 'bash',
-    args: ['-lc', 'chown -R apache:apache /vercel/sandbox/wordpress || true'],
-    sudo: true,
-    stdout: process.stdout,
-    stderr: process.stderr
-  });
+  // NOTE: We'll set apache ownership AFTER writing wp-config.php
 
   // 3) Configure wp-config.php for external DB
-  //   sendUpdate('Configuring WordPress database...');
+  sendUpdate('Configuring WordPress database...');
 
-  //   const publicUrl = process.env.MYSQL_PUBLIC_URL!;
-  //   const parsed = new URL(publicUrl);
+  console.log('ENV MYSQL_* VALUES:', {
+    MYSQL_PUBLIC_URL: process.env.MYSQL_PUBLIC_URL ? '[SET]' : '[NOT SET]',
+    MYSQLDATABASE: process.env.MYSQLDATABASE,
+    MYSQL_DATABASE: process.env.MYSQL_DATABASE,
+    MYSQLUSER: process.env.MYSQLUSER,
+    MYSQLPASSWORD: process.env.MYSQLPASSWORD ? '[SET]' : '[NOT SET]',
+    MYSQL_ROOT_PASSWORD: process.env.MYSQL_ROOT_PASSWORD ? '[SET]' : '[NOT SET]'
+  });
 
-  //   const dbName =
-  //     process.env.MYSQLDATABASE ||
-  //     process.env.MYSQL_DATABASE ||
-  //     parsed.pathname.replace(/^\//, '');
-  //   const dbUser = process.env.MYSQLUSER || parsed.username;
-  //   const dbPassword =
-  //     process.env.MYSQLPASSWORD ||
-  //     process.env.MYSQL_ROOT_PASSWORD ||
-  //     parsed.password;
-  //   const dbHost = parsed.hostname;
-  //   const dbPort = parsed.port || '3306';
+  const publicUrl = process.env.MYSQL_PUBLIC_URL;
+  if (!publicUrl) {
+    throw new Error('MYSQL_PUBLIC_URL env var is required but not set');
+  }
 
-  //   console.log('Using DB config:', { dbHost, dbPort, dbName, dbUser });
+  let parsed: URL;
+  try {
+    parsed = new URL(publicUrl);
+  } catch (e) {
+    throw new Error(
+      `Invalid MYSQL_PUBLIC_URL format: ${
+        e instanceof Error ? e.message : 'parse error'
+      }`
+    );
+  }
 
-  //   // Generate random keys for WordPress security
-  //   // Using only characters safe for PHP single-quoted strings (no single quotes or backslashes)
-  //   const generateKey = () => {
-  //     const chars =
-  //       'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#%^&*()-_[]{}|;:,.?';
-  //     let key = '';
-  //     for (let i = 0; i < 64; i++) {
-  //       key += chars.charAt(Math.floor(Math.random() * chars.length));
-  //     }
-  //     return key;
-  //   };
+  // URL class auto-decodes username/password, but let's be explicit
+  const rawDbName =
+    process.env.MYSQLDATABASE ||
+    process.env.MYSQL_DATABASE ||
+    parsed.pathname.replace(/^\//, '');
+  const rawDbUser =
+    process.env.MYSQLUSER || decodeURIComponent(parsed.username);
+  const rawDbPassword =
+    process.env.MYSQLPASSWORD ||
+    process.env.MYSQL_ROOT_PASSWORD ||
+    decodeURIComponent(parsed.password);
+  const dbHost = parsed.hostname;
+  const dbPort = parsed.port || '3306';
 
-  //   const wpConfig = `<?php
-  //   define( 'DB_NAME', '${dbName}' );
-  //   define( 'DB_USER', '${dbUser}' );
-  //   define( 'DB_PASSWORD', '${dbPassword}' );
-  //   define( 'DB_HOST', '${dbHost}:${dbPort}' );
-  //   define( 'DB_CHARSET', 'utf8mb4' );
-  //   define( 'DB_COLLATE', '' );
+  if (!rawDbName || !rawDbUser || !rawDbPassword || !dbHost) {
+    console.error('DB config is incomplete:', {
+      rawDbName,
+      rawDbUser,
+      hasPassword: !!rawDbPassword,
+      dbHost,
+      dbPort
+    });
+    throw new Error('Incomplete DB config from MYSQL_PUBLIC_URL / env vars');
+  }
 
-  //   /**
-  //    * Authentication Unique Keys and Salts.
-  //    * Generate new ones at: https://api.wordpress.org/secret-key/1.1/salt/
-  //    */
-  //   define( 'AUTH_KEY',         '${generateKey()}' );
-  //   define( 'SECURE_AUTH_KEY',  '${generateKey()}' );
-  //   define( 'LOGGED_IN_KEY',    '${generateKey()}' );
-  //   define( 'NONCE_KEY',        '${generateKey()}' );
-  //   define( 'AUTH_SALT',        '${generateKey()}' );
-  //   define( 'SECURE_AUTH_SALT', '${generateKey()}' );
-  //   define( 'LOGGED_IN_SALT',   '${generateKey()}' );
-  //   define( 'NONCE_SALT',       '${generateKey()}' );
+  // Escape for PHP single-quoted strings
+  const dbName = rawDbName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const dbUser = rawDbUser.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const dbPassword = rawDbPassword.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
-  //   $table_prefix = 'wp_';
+  console.log('Using DB config (escaped for PHP):', {
+    dbHost,
+    dbPort,
+    dbName,
+    dbUser,
+    passwordLength: dbPassword.length
+  });
 
-  //   define( 'WP_DEBUG', true );
+  // Generate random keys for WordPress security (alphanumeric only to avoid escaping issues)
+  const generateKey = () => {
+    const chars =
+      'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let key = '';
+    for (let i = 0; i < 64; i++) {
+      key += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return key;
+  };
 
-  //   /* Handle reverse proxy / load balancer HTTPS */
-  //   if (
-  //       isset($_SERVER['HTTP_X_FORWARDED_PROTO']) &&
-  //       $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https'
-  //   ) {
-  //       $_SERVER['HTTPS'] = 'on';
-  //   }
+  const wpConfig = `<?php
+define( 'DB_NAME', '${dbName}' );
+define( 'DB_USER', '${dbUser}' );
+define( 'DB_PASSWORD', '${dbPassword}' );
+define( 'DB_HOST', '${dbHost}:${dbPort}' );
+define( 'DB_CHARSET', 'utf8mb4' );
+define( 'DB_COLLATE', '' );
 
-  //   define( 'WP_HOME', 'https://' . $_SERVER['HTTP_HOST'] );
-  //   define( 'WP_SITEURL', 'https://' . $_SERVER['HTTP_HOST'] );
+define( 'AUTH_KEY',         '${generateKey()}' );
+define( 'SECURE_AUTH_KEY',  '${generateKey()}' );
+define( 'LOGGED_IN_KEY',    '${generateKey()}' );
+define( 'NONCE_KEY',        '${generateKey()}' );
+define( 'AUTH_SALT',        '${generateKey()}' );
+define( 'SECURE_AUTH_SALT', '${generateKey()}' );
+define( 'LOGGED_IN_SALT',   '${generateKey()}' );
+define( 'NONCE_SALT',       '${generateKey()}' );
 
-  //   /* That's all, stop editing! Happy publishing. */
-  //   if ( ! defined( 'ABSPATH' ) ) {
-  //       define( 'ABSPATH', __DIR__ . '/' );
-  //   }
+$table_prefix = 'wp_';
 
-  //   require_once ABSPATH . 'wp-settings.php';
-  //   `;
+define( 'WP_DEBUG', true );
+define( 'WP_DEBUG_LOG', true );
+define( 'WP_DEBUG_DISPLAY', true );
 
-  //   await sandbox.writeFiles([
-  //     {
-  //       path: '/vercel/sandbox/wordpress/wp-config.php',
-  //       content: Buffer.from(wpConfig)
-  //     }
-  //   ]);
+/* Handle reverse proxy / load balancer HTTPS */
+if (
+    isset($_SERVER['HTTP_X_FORWARDED_PROTO']) &&
+    $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https'
+) {
+    $_SERVER['HTTPS'] = 'on';
+}
+
+define( 'WP_HOME', 'https://' . $_SERVER['HTTP_HOST'] );
+define( 'WP_SITEURL', 'https://' . $_SERVER['HTTP_HOST'] );
+
+/* That's all, stop editing! Happy publishing. */
+if ( ! defined( 'ABSPATH' ) ) {
+    define( 'ABSPATH', __DIR__ . '/' );
+}
+
+require_once ABSPATH . 'wp-settings.php';
+`;
+
+  try {
+    console.log('Writing wp-config.php, content length:', wpConfig.length);
+
+    // Use base64 to safely pass content through bash, and sudo to write to apache-owned dir
+    const wpConfigBase64 = Buffer.from(wpConfig, 'utf-8').toString('base64');
+
+    const writeResult = await sandbox.runCommand({
+      cmd: 'bash',
+      args: [
+        '-c',
+        `echo '${wpConfigBase64}' | base64 -d > /vercel/sandbox/wordpress/wp-config.php`
+      ],
+      sudo: true,
+      stdout: process.stdout,
+      stderr: process.stderr
+    });
+
+    if (writeResult.exitCode !== 0) {
+      throw new Error(
+        `Write command failed with exit code ${writeResult.exitCode}`
+      );
+    }
+
+    // Now set apache ownership for the entire wordpress directory
+    await sandbox.runCommand({
+      cmd: 'chown',
+      args: ['-R', 'apache:apache', '/vercel/sandbox/wordpress'],
+      sudo: true,
+      stdout: process.stdout,
+      stderr: process.stderr
+    });
+
+    console.log('wp-config.php written successfully');
+  } catch (writeError) {
+    console.error('Step 3 - Failed to write wp-config.php:', writeError);
+    throw new Error(
+      `[Step 3] Failed to write wp-config.php: ${
+        writeError instanceof Error ? writeError.message : 'unknown error'
+      }`
+    );
+  }
 
   // 4) Configure Apache (httpd) for WordPress with PHP-FPM
   sendUpdate('Configuring Apache for WordPress...');
@@ -238,45 +339,45 @@ export const initSandbox = async ({
   // No need to touch proxy modules; they're already loaded on AL2023.
 
   const httpdVhostConfig = `ServerName localhost
- 
- <VirtualHost *:3000>
-     ServerName localhost
- 
-     DocumentRoot /vercel/sandbox/wordpress
- 
-     # Allow Apache to serve everything under /vercel
-     <Directory "/vercel">
-         Options Indexes FollowSymLinks
-         AllowOverride All
-         Require all granted
-     </Directory>
- 
-     <Directory "/vercel/sandbox">
-         Options Indexes FollowSymLinks
-         AllowOverride All
-         Require all granted
-     </Directory>
- 
-     <Directory "/vercel/sandbox/wordpress">
-         Options Indexes FollowSymLinks
-         AllowOverride All
-         Require all granted
-     </Directory>
- 
-     DirectoryIndex index.php index.html
- 
-     ErrorLog /var/log/httpd/wordpress-error.log
-     CustomLog /var/log/httpd/wordpress-access.log combined
- 
-     # PHP-FPM handler via Unix socket
-     <FilesMatch \\.php$>
-         SetHandler "proxy:unix:/run/php-fpm/www.sock|fcgi://localhost"
-     </FilesMatch>
- </VirtualHost>
- 
- # Listen on port 3000 for this vhost
- Listen 3000
- `;
+
+   <VirtualHost *:3000>
+       ServerName localhost
+
+       DocumentRoot /vercel/sandbox/wordpress
+
+       # Allow Apache to serve everything under /vercel
+       <Directory "/vercel">
+           Options Indexes FollowSymLinks
+           AllowOverride All
+           Require all granted
+       </Directory>
+
+       <Directory "/vercel/sandbox">
+           Options Indexes FollowSymLinks
+           AllowOverride All
+           Require all granted
+       </Directory>
+
+       <Directory "/vercel/sandbox/wordpress">
+           Options Indexes FollowSymLinks
+           AllowOverride All
+           Require all granted
+       </Directory>
+
+       DirectoryIndex index.php index.html
+
+       ErrorLog /var/log/httpd/wordpress-error.log
+       CustomLog /var/log/httpd/wordpress-access.log combined
+
+       # PHP-FPM handler via Unix socket
+       <FilesMatch \\.php$>
+           SetHandler "proxy:unix:/run/php-fpm/www.sock|fcgi://localhost"
+       </FilesMatch>
+   </VirtualHost>
+
+   # Listen on port 3000 for this vhost
+   Listen 3000
+   `;
 
   // Write the vhost config as a regular file, then move it into place with sudo
   await sandbox.writeFiles([

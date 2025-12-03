@@ -21,13 +21,15 @@ export async function GET() {
         );
         controller.close();
       } catch (error) {
+        console.error('Sandbox initialization error:', error);
+
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
         const errorPayload = {
           action: 'error',
           step: 0,
           totalSteps: 5,
-          text: `Error: ${
-            error instanceof Error ? error.message : 'Unknown error'
-          }`
+          text: errorMessage
         };
 
         controller.enqueue(
