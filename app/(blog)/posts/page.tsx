@@ -1,17 +1,7 @@
-import {
-  getAllPosts,
-  getAllAuthors,
-  getAllTags,
-  getAllCategories,
-  searchAuthors,
-  searchTags,
-  searchCategories
-} from '@/lib/wordpress';
+import { getAllPosts } from '@/lib/wordpress';
 
 import { Section, Container, Prose } from '@/components/craft';
 import { PostCard } from '@/components/posts/post-card';
-import { FilterPosts } from '@/components/posts/filter';
-import { SearchInput } from '@/components/posts/search-input';
 
 import type { Metadata } from 'next';
 
@@ -20,26 +10,8 @@ export const metadata: Metadata = {
   description: 'Browse all our blog posts'
 };
 
-export default async function Page({
-  searchParams
-}: {
-  searchParams: Promise<{
-    author?: string;
-    tag?: string;
-    category?: string;
-    search?: string;
-  }>;
-}) {
-  const params = await searchParams;
-  const { author, tag, category, search } = params;
-
-  // Fetch data based on search parameters
-  const [posts, authors, tags, categories] = await Promise.all([
-    getAllPosts({ author, tag, category, search }),
-    search ? searchAuthors(search) : getAllAuthors(),
-    search ? searchTags(search) : getAllTags(),
-    search ? searchCategories(search) : getAllCategories()
-  ]);
+export default async function Page() {
+  const posts = await getAllPosts();
 
   return (
     <Section>
@@ -49,7 +21,6 @@ export default async function Page({
             <h2>All Posts</h2>
             <p className="text-muted-foreground">
               {posts.length} {posts.length === 1 ? 'post' : 'posts'} found
-              {search && ' matching your search'}
             </p>
           </Prose>
 
