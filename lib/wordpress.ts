@@ -14,8 +14,6 @@ import type {
 
 const baseUrl = process.env.WORDPRESS_URL;
 
-console.log('baseUrl', baseUrl);
-
 if (!baseUrl) {
   throw new Error('WORDPRESS_URL environment variable is not defined');
 }

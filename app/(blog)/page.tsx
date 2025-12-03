@@ -1,13 +1,13 @@
 // Craft Imports
-import { Section, Container, Prose } from "@/components/craft";
+import { Section, Container, Prose } from '@/components/craft';
 
 // Next.js Imports
-import Link from "next/link";
+import Link from 'next/link';
 
 // Icons
-import { File, Pen, Tag, Diamond, User, Folder } from "lucide-react";
-import { WordPressIcon } from "@/components/icons/wordpress";
-import { NextJsIcon } from "@/components/icons/nextjs";
+import { File, Pen, Tag, Diamond, User, Folder } from 'lucide-react';
+import { WordPressIcon } from '@/components/icons/wordpress';
+import { NextJsIcon } from '@/components/icons/nextjs';
 
 // This page is using the craft.tsx component and design system
 export default function Home() {
@@ -30,37 +30,18 @@ const ToDelete = () => {
         <p>
           This is <a href="https://github.com/9d8dev/next-wp">next-wp</a>,
           created as a way to build WordPress sites with Next.js at rapid speed.
-          This starter is designed with{" "}
-          <a href="https://ui.shadcn.com">shadcn/ui</a>,{" "}
-          <a href="https://craft-ds.com">craft-ds</a>, and Tailwind CSS. Use{" "}
+          This starter is designed with{' '}
+          <a href="https://ui.shadcn.com">shadcn/ui</a>,{' '}
+          <a href="https://craft-ds.com">craft-ds</a>, and Tailwind CSS. Use{' '}
           <a href="https://components.work">brijr/components</a> to build your
           site with prebuilt components. The data fetching and typesafety is
-          handled in <code>lib/wordpress.ts</code> and{" "}
+          handled in <code>lib/wordpress.ts</code> and{' '}
           <code>lib/wordpress.d.ts</code>.
         </p>
       </Prose>
 
       <div className="flex justify-between items-center gap-4">
         {/* Vercel Clone Starter */}
-        <div className="flex items-center gap-3">
-          <a
-            className="h-auto block"
-            href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2F9d8dev%2Fnext-wp&env=WORDPRESS_URL,WORDPRESS_HOSTNAME&envDescription=Add%20WordPress%20URL%20with%20Rest%20API%20enabled%20(ie.%20https%3A%2F%2Fwp.example.com)%20abd%20the%20hostname%20for%20Image%20rendering%20in%20Next%20JS%20(ie.%20wp.example.com)&project-name=next-wp&repository-name=next-wp&demo-title=Next%20JS%20and%20WordPress%20Starter&demo-url=https%3A%2F%2Fwp.9d8.dev"
-          >
-            {/* eslint-disable-next-line */}
-            <img
-              className="not-prose my-4"
-              src="https://vercel.com/button"
-              alt="Deploy with Vercel"
-              width={105}
-              height={32.62}
-            />
-          </a>
-          <p className="text-sm! sr-only sm:not-sr-only text-muted-foreground">
-            Deploy with Vercel in seconds.
-          </p>
-        </div>
-
         <div className="flex gap-2 items-center">
           <WordPressIcon className="text-foreground" width={32} height={32} />
           <NextJsIcon className="text-foreground" width={32} height={32} />
@@ -74,7 +55,7 @@ const ToDelete = () => {
         >
           <Pen size={32} />
           <span>
-            Posts{" "}
+            Posts{' '}
             <span className="block text-sm text-muted-foreground">
               All posts from your WordPress
             </span>
@@ -86,7 +67,7 @@ const ToDelete = () => {
         >
           <File size={32} />
           <span>
-            Pages{" "}
+            Pages{' '}
             <span className="block text-sm text-muted-foreground">
               Custom pages from your WordPress
             </span>
@@ -98,7 +79,7 @@ const ToDelete = () => {
         >
           <User size={32} />
           <span>
-            Authors{" "}
+            Authors{' '}
             <span className="block text-sm text-muted-foreground">
               List of the authors from your WordPress
             </span>
@@ -110,7 +91,7 @@ const ToDelete = () => {
         >
           <Tag size={32} />
           <span>
-            Tags{" "}
+            Tags{' '}
             <span className="block text-sm text-muted-foreground">
               Content by tags from your WordPress
             </span>
@@ -122,7 +103,7 @@ const ToDelete = () => {
         >
           <Diamond size={32} />
           <span>
-            Categories{" "}
+            Categories{' '}
             <span className="block text-sm text-muted-foreground">
               Categories from your WordPress
             </span>
@@ -134,7 +115,7 @@ const ToDelete = () => {
         >
           <Folder size={32} />
           <span>
-            Documentation{" "}
+            Documentation{' '}
             <span className="block text-sm text-muted-foreground">
               How to use `next-wp`
             </span>
