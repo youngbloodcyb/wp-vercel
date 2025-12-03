@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbo",
-    "build": "next build",
+    "build": "npx tsx scripts/sandbox-init.ts && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "postbuild": "npx tsx scripts/post-build.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

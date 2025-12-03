@@ -12,14 +12,21 @@ async function main() {
   const sandbox = await initSandbox();
 
   const url = sandbox.domain(3000);
-  console.log('WordPress is live at:', url);
+  const sandboxId = sandbox.sandboxId;
 
-  // Write the sandbox URL to a config file
+  console.log('WordPress is live at:', url);
+  console.log('Sandbox ID:', sandboxId);
+
+  // Write the sandbox URL and ID to a config file
   const outPath = path.join(process.cwd(), 'sandbox.config.mjs');
-  const contents = `export const WORDPRESS_URL = ${JSON.stringify(url)};\n`;
+  const contents = `export const WORDPRESS_URL = ${JSON.stringify(url)};
+export const SANDBOX_ID = ${JSON.stringify(sandboxId)};
+`;
 
   fs.writeFileSync(outPath, contents);
-  console.log('Sandbox URL written to sandbox.config.mjs:', url);
+  console.log('Sandbox config written to sandbox.config.mjs');
+
+  process.exit(0);
 }
 
 main().catch((err) => {
