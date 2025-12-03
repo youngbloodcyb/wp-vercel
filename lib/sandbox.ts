@@ -314,6 +314,32 @@ require_once ABSPATH . 'wp-settings.php';
       );
     }
 
+    // Create .htaccess for WordPress permalinks and REST API
+    const htaccess = `# BEGIN WordPress
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+RewriteBase /
+RewriteRule ^index\\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+# END WordPress
+`;
+
+    const htaccessBase64 = Buffer.from(htaccess, 'utf-8').toString('base64');
+    await sandbox.runCommand({
+      cmd: 'bash',
+      args: [
+        '-c',
+        `echo '${htaccessBase64}' | base64 -d > /vercel/sandbox/wordpress/.htaccess`
+      ],
+      sudo: true,
+      stdout: process.stdout,
+      stderr: process.stderr
+    });
+
     // Now set apache ownership for the entire wordpress directory
     await sandbox.runCommand({
       cmd: 'chown',
@@ -323,7 +349,7 @@ require_once ABSPATH . 'wp-settings.php';
       stderr: process.stderr
     });
 
-    console.log('wp-config.php written successfully');
+    console.log('wp-config.php and .htaccess written successfully');
   } catch (writeError) {
     console.error('Step 3 - Failed to write wp-config.php:', writeError);
     throw new Error(
@@ -340,44 +366,47 @@ require_once ABSPATH . 'wp-settings.php';
 
   const httpdVhostConfig = `ServerName localhost
 
-   <VirtualHost *:3000>
-       ServerName localhost
+# Enable mod_rewrite for WordPress permalinks
+LoadModule rewrite_module modules/mod_rewrite.so
 
-       DocumentRoot /vercel/sandbox/wordpress
+<VirtualHost *:3000>
+    ServerName localhost
 
-       # Allow Apache to serve everything under /vercel
-       <Directory "/vercel">
-           Options Indexes FollowSymLinks
-           AllowOverride All
-           Require all granted
-       </Directory>
+    DocumentRoot /vercel/sandbox/wordpress
 
-       <Directory "/vercel/sandbox">
-           Options Indexes FollowSymLinks
-           AllowOverride All
-           Require all granted
-       </Directory>
+    # Allow Apache to serve everything under /vercel
+    <Directory "/vercel">
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
 
-       <Directory "/vercel/sandbox/wordpress">
-           Options Indexes FollowSymLinks
-           AllowOverride All
-           Require all granted
-       </Directory>
+    <Directory "/vercel/sandbox">
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
 
-       DirectoryIndex index.php index.html
+    <Directory "/vercel/sandbox/wordpress">
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
 
-       ErrorLog /var/log/httpd/wordpress-error.log
-       CustomLog /var/log/httpd/wordpress-access.log combined
+    DirectoryIndex index.php index.html
 
-       # PHP-FPM handler via Unix socket
-       <FilesMatch \\.php$>
-           SetHandler "proxy:unix:/run/php-fpm/www.sock|fcgi://localhost"
-       </FilesMatch>
-   </VirtualHost>
+    ErrorLog /var/log/httpd/wordpress-error.log
+    CustomLog /var/log/httpd/wordpress-access.log combined
 
-   # Listen on port 3000 for this vhost
-   Listen 3000
-   `;
+    # PHP-FPM handler via Unix socket
+    <FilesMatch \\.php$>
+        SetHandler "proxy:unix:/run/php-fpm/www.sock|fcgi://localhost"
+    </FilesMatch>
+</VirtualHost>
+
+# Listen on port 3000 for this vhost
+Listen 3000
+`;
 
   // Write the vhost config as a regular file, then move it into place with sudo
   await sandbox.writeFiles([
@@ -454,6 +483,48 @@ require_once ABSPATH . 'wp-settings.php';
     stdout: process.stdout,
     stderr: process.stderr,
     detached: true
+  });
+
+  // Give Apache a moment to start
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+
+  // 7) Install WP-CLI and configure permalinks for REST API
+  sendUpdate('Configuring WordPress permalinks...');
+
+  // Download WP-CLI
+  await sandbox.runCommand({
+    cmd: 'bash',
+    args: [
+      '-lc',
+      'curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp'
+    ],
+    sudo: true,
+    stdout: process.stdout,
+    stderr: process.stderr
+  });
+
+  // Set permalink structure using WP-CLI (enables REST API pretty URLs)
+  await sandbox.runCommand({
+    cmd: 'bash',
+    args: [
+      '-lc',
+      'cd /vercel/sandbox/wordpress && wp rewrite structure "/%postname%/" --hard --allow-root'
+    ],
+    sudo: true,
+    stdout: process.stdout,
+    stderr: process.stderr
+  });
+
+  // Flush rewrite rules
+  await sandbox.runCommand({
+    cmd: 'bash',
+    args: [
+      '-lc',
+      'cd /vercel/sandbox/wordpress && wp rewrite flush --hard --allow-root'
+    ],
+    sudo: true,
+    stdout: process.stdout,
+    stderr: process.stderr
   });
 
   console.log('WordPress should be available at:', sandbox.domain(3000));
